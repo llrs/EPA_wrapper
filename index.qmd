@@ -1,0 +1,326 @@
+---
+title: "Extracción y redifusión de la EPA"
+author: "Lluís Revilla"
+engine: knitr
+knitr:
+  opts_chunk: 
+    class-output: hscroll
+execute: 
+  cache: true
+  echo: true
+format:
+  revealjs:
+    incremental: true  
+    footer: "[llrs.dev](https://llrs.dev)"
+---
+
+## Recursos
+
+```{css, echo=FALSE}
+.hscroll {
+  overflow-x: auto;
+  white-space: nowrap;
+}
+```
+
+[Taller Congreso R](https://drive.google.com/drive/folders/1AYkgaUo40r2Rf5pZfBjJTBFR14n_RjiN)
+
+-   [Conectar R and DataWrapper](https://drive.google.com/drive/folders/1_99bNUNzDCxrKuDPcVyWe3WfEHMSpn4Y)
+
+-   [Com utilitzar R per treballar amb microdades](https://drive.google.com/drive/folders/1Csxw3rJqWWfcqCgAiadSaJy9v1JVA4LI)
+
+Otros:
+
+-  [Scripts](https://github.com/danielredondo/INE_R/)
+
+-  [Esta web](https://useR_EPA.llrs.dev)
+
+## ¿ Datos ?
+
+Website:
+
+<https://www.ine.es/jaxiT3/dlgExport.htm?t=4248&L=0>
+
+![](images/EPA_4248){.nostretch fig-align="center" width="800px"}
+
+## Descargar datos {.scrollable}
+
+-   XLS: <https://www.ine.es/jaxiT3/files/t/es/xls/4248.xls>
+-   XLSX: <https://www.ine.es/jaxiT3/files/t/es/xlsx/4248.xlsx>
+-   TSV (\\t): <https://www.ine.es/jaxiT3/files/t/es/csv_bd/4248.csv>
+-   CSV (;): <https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/4248.csv>
+-   Pc-Axis: <https://www.ine.es/jaxiT3/files/t/es/px/4248.px>
+-   JSON: <https://servicios.ine.es/wstempus/jsCache/es/DATOS_TABLA/4248?tip=AM&>
+-   TSV (\\t): <https://www.ine.es/jaxiT3/files/t/es/csv/4248.csv>
+-   CSV (,): <https://www.ine.es/jaxiT3/files/t/es/csv_c/4248.csv>
+-   CSV (;): <https://www.ine.es/jaxiT3/files/t/es/csv_sc/4248.csv>
+
+## En R
+
+```{r}
+url <- "https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/4248.csv"
+download.file(url, file.path("data", basename(url)))
+```
+
+## Descargar varios archivos
+
+```{r}
+download_file <- function(id) {
+  read.csv(paste0("https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/",id, ".xls"), 
+           sep = ";", header = 1,
+                  dec = ",", check.names = FALSE)
+}
+df <- download_file(4248)
+# df <- download_file(181)
+```
+
+Descargar ~1000 archivos:
+
+```{r}
+#| eval = FALSE
+files <- sapply(1:1000, function(x){
+  # url <- paste0("https://www.ine.es/jaxiT3/dlgExport.htm?t=", x, "&L=0")
+  url <- paste0("https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/", x, ".xls?nocab=1")
+  file_path <- paste0("data/", x, ".csv")
+  download.file(url, destfile = file_path)
+  if (file.exists(file_path)) {
+    file_path
+  } else {
+    NULL
+  }
+})
+```
+
+## EPA
+
+EPA website: 
+
+![EPA screenshot](images/EPA_screen.png)
+
+---
+
+### Descargar EPA
+
+Where is the data?
+
+![EPA microdatos screenshot](images/EPA_datos.png)
+
+---
+
+### EPA desde R {#descargar}
+
+```{r}
+download_epa <- function(trimester, year) {
+  
+  stopifnot(nchar(year) == 2)
+  stopifnot(nchar(trimester) == 1L)
+  url <- paste0("https://www.ine.es/ftp/microdatos/epa/datos_", 
+               trimester, "t", year, ".zip")
+  file_zip <- file.path("data", basename(url))
+  download.file(url, file_zip)
+  file_zip
+}
+EPA_4t23 <- download_epa("4", "23")
+```
+
+---
+
+### Cargar los datos
+
+```{r}
+unzip(EPA_4t23, exdir = "data/EPA_4t23/")
+obj <- load("data/EPA_4t23/R/EPA_2023T4.RData")
+obj
+# View(Metadatos)
+micro <- as.data.frame(Microdatos)
+micro[1:5, 1:5]
+```
+
+---
+
+### ¿Qué hay?
+
+```{r}
+library("MicroDatosEs")
+variables <- read.delim2(system.file("metadata", "epa_mdat2.txt", 
+                        package = "MicroDatosEs"))
+columnas <- read.delim2(system.file("metadata", "epa_mdat1.txt", 
+                        package = "MicroDatosEs"))
+head(variables)
+head(columnas)
+```
+
+---
+
+### Los datos {#procesar}
+
+```{r}
+library("dplyr")
+our_data <- micro |> 
+  count(CCAA, PROV) |> 
+  group_by(CCAA) |> 
+  mutate(n_provincias = n_distinct(PROV)) |> 
+  ungroup()
+
+head(our_data)
+```
+
+
+---
+
+#### CCAA
+
+```{r}
+ccaa <- variables |> filter(var  == "CCAA") |> 
+  tidyr::pivot_wider(names_from = var, values_from = valor) |> 
+  mutate(llave = if_else(nchar(llave) == 1L, paste0("0", llave), llave)) |> 
+  rename(ca = CCAA) |> 
+  mutate(ca = trimws(ca)) |> 
+  select(-tipo, -nulo)
+head(ccaa)
+```
+
+
+---
+
+#### Provincias
+
+```{r}
+prov <- variables |> filter(var  == "PROV") |> 
+  tidyr::pivot_wider(names_from = var, values_from = valor) |> 
+  mutate(llave = if_else(nchar(llave) == 1L, paste0("0", llave), llave)) |> 
+  rename(provincia = PROV) |> 
+  mutate(provincia = trimws(provincia)) |> 
+  select(-tipo, -nulo)
+head(prov)
+```
+
+---
+
+#### Juntando
+
+```{r}
+m_ccaa <- merge(our_data, ccaa, 
+                by.x = "CCAA", by.y = "llave", 
+                sort = FALSE)
+m_ccaa_prov <- merge(m_ccaa, prov, 
+                     by.x = "PROV", by.y = "llave", 
+                     sort = FALSE)
+head(m_ccaa_prov)
+```
+
+## Cargar a Google {#google}
+
+```{r}
+#| eval = FALSE
+library("googlesheets4")
+gs4_user()
+gs <- googlesheets4::gs4_create(name = "EPA", 
+                          sheets = m_ccaa_prov,
+                          timeZone = "Europe/Madrid")
+gs
+```
+
+## Data Wrapper {#datawrapper}
+
+Registrarse en [DataWrapper](https://datawrapper.de).
+
+![Screenshot for API Access](images/Datawrapper.png)
+
+---
+
+### Cargar de R a DataWrapper
+
+```{r}
+library("DatawRappr")
+datawrapper_auth(api_key = Sys.getenv("DATAWRAPPER"))
+placeholder <- dw_test_key()
+dcc <- dw_create_chart(title = "EPA", type = "tables")
+dw_data_to_chart(m_ccaa_prov, dcc$id)
+```
+
+---
+
+### Conectar Google a DataWrapper
+
+```{r epa_find}
+epa_gs <- gs4_find("EPA")
+url <- paste0("https://docs.google.com/spreadsheets/d/", epa_gs$id[1])
+```
+
+En teoria también por:
+
+```{r googledrive}
+library("googledrive")
+drive_publish(epa_gs$id[3])
+```
+
+::: {.callout-tip}
+#### Usa la web
+Si no funciona usa el navegador
+:::
+
+## Ejercicio
+
+¿Te acuerdas de `df`?
+```{r}
+head(df)
+```
+
+Repite el proceso con estos datos.
+
+## Repaso
+
+ - [Descargar datos del INE](#descargar)
+ 
+ - [Procesarlos con R](#procesar)
+ 
+ - [Subirlos a Google Drive](#google)
+ 
+ - [Conectarlo con Data Wrapper](#datawrapper)
+
+## Otros  {visibility="uncounted"}
+
+¿Acceso fácil y programable?
+
+![](images/API_INE.png){.nostretch fig-align="center" width="800px"}
+
+---
+
+### Operaciones disponibles  {visibility="uncounted"}
+
+```{r}
+ine <- download.file("https://servicios.ine.es/wstempus/js/ES/OPERACIONES_DISPONIBLES",
+              destfile = "data/operaciones.json")
+operaciones <- jsonlite::fromJSON("data/operaciones.json", flatten = TRUE)
+head(operaciones)
+```
+
+---
+
+### Publicaciones  {visibility="uncounted"}
+
+```{r}
+publicaciones_url <- "https://servicios.ine.es/wstempus/js/ES/PUBLICACIONES"
+download.file(publicaciones_url, "data/publicaciones.json")
+public <- jsonlite::fromJSON("data/publicaciones.json", flatten = TRUE)
+publications <- list2DF(public)
+head(publications)
+```
+
+---
+
+### Otras publicaciones  {visibility="uncounted"}
+
+```{r}
+#| eval = FALSE
+download.file("https://servicios.ine.es/wstempus/js/ES/PUBLICACIONFECHA_PUBLICACION/6?det=15",
+              destfile = "data/fechapub6.json")
+fechas <- jsonlite::fromJSON("data/fechapub6.json", flatten = TRUE)
+download.file("https://servicios.ine.es/wstempus/js/ES/PUBLICACIONFECHA_PUBLICACION/7?det=2",
+              destfile = "data/fechapub7.json")
+fechas7 <- jsonlite::fromJSON("data/fechapub7.json", flatten = TRUE)
+download.file("https://servicios.ine.es/wstempus/js/ES/PUBLICACIONFECHA_PUBLICACION/8?det=2",
+              destfile = "data/fechapub8.json")
+fechas8 <- jsonlite::fromJSON("data/fechapub8.json", flatten = TRUE)
+```
